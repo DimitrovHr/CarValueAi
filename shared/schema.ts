@@ -29,6 +29,7 @@ export const carValuations = pgTable("car_valuations", {
   model: text("model").notNull(),
   year: integer("year").notNull(),
   mileage: integer("mileage").notNull(),
+  vin: text("vin"), // Vehicle Identification Number (optional but helps with more precise valuations)
   condition: text("condition").notNull(), // excellent, very-good, good, fair, poor
   estimatedValue: decimal("estimated_value", { precision: 10, scale: 2 }),
   confidence: decimal("confidence", { precision: 4, scale: 2 }), // 0.00 - 1.00

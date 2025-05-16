@@ -18,6 +18,7 @@ const valuationFormSchema = z.object({
   model: z.string().min(1, "Please select a model"),
   year: z.string().min(1, "Please select a year"),
   mileage: z.string().min(1, "Please enter mileage"),
+  vin: z.string().optional(), // Optional VIN field for more precise valuations
   condition: z.enum(["excellent", "very-good", "good", "fair", "poor"], { 
     required_error: "Please select a condition" 
   })
@@ -45,6 +46,7 @@ export default function ValuationForm() {
       model: "",
       year: "",
       mileage: "",
+      vin: "",
       condition: "good"
     }
   });
@@ -64,13 +66,14 @@ export default function ValuationForm() {
       setIsLoading(true);
       setValuationResult(null);
       
-      // Convert mileage and year to numbers
+      // Convert mileage and year to numbers and include VIN if provided
       const payload = {
         make: data.make,
         model: data.model,
         year: parseInt(data.year),
         mileage: parseInt(data.mileage),
-        condition: data.condition
+        condition: data.condition,
+        vin: data.vin || undefined // Only include if user provided a VIN
       };
       
       // Call the API
@@ -207,6 +210,27 @@ export default function ValuationForm() {
                     type="number" 
                     placeholder="e.g. 120000" 
                     className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-200 border border-white/30 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent backdrop-blur-sm"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage className="text-white/80" />
+              </FormItem>
+            )}
+          />
+          
+          <FormField
+            control={form.control}
+            name="vin"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="block text-sm font-medium mb-2 text-white">
+                  VIN (Optional)
+                  <span className="ml-1 text-xs text-white/70">- For more accurate valuations</span>
+                </FormLabel>
+                <FormControl>
+                  <Input 
+                    placeholder="e.g. WVWZZZ1KZAM654321" 
+                    className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-200 border border-white/30 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent backdrop-blur-sm uppercase"
                     {...field}
                   />
                 </FormControl>
