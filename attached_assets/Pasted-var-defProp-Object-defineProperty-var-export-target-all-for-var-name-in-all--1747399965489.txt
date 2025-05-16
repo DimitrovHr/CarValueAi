@@ -1,0 +1,1095 @@
+var __defProp = Object.defineProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// server/index.ts
+import express2 from "express";
+
+// server/routes.ts
+import { createServer } from "http";
+
+// shared/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  businessSubscriptions: () => businessSubscriptions,
+  carValuations: () => carValuations,
+  inquiries: () => inquiries,
+  insertBusinessSubscriptionSchema: () => insertBusinessSubscriptionSchema,
+  insertCarValuationSchema: () => insertCarValuationSchema,
+  insertInquirySchema: () => insertInquirySchema,
+  insertPaymentSchema: () => insertPaymentSchema,
+  insertUserSchema: () => insertUserSchema,
+  payments: () => payments,
+  users: () => users
+});
+import { pgTable, text, serial, integer, boolean, timestamp, decimal, json } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+var users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  password: text("password").notNull(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  role: text("role").default("user"),
+  // user, admin
+  plan: text("plan").default("free"),
+  // free, regular, premium, business
+  apiKey: text("api_key").unique(),
+  usageLimit: integer("usage_limit"),
+  // For business clients: number of inquiries allowed
+  usageCount: integer("usage_count").default(0),
+  // Number of inquiries used
+  isActive: boolean("is_active").default(true),
+  lastLoginAt: timestamp("last_login_at")
+});
+var carValuations = pgTable("car_valuations", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  clientEmail: text("client_email"),
+  // Added for business clients who submit valuations for their customers
+  make: text("make").notNull(),
+  model: text("model").notNull(),
+  year: integer("year").notNull(),
+  mileage: integer("mileage").notNull(),
+  vin: text("vin"),
+  // Vehicle Identification Number (optional but helps with more precise valuations)
+  condition: text("condition").notNull(),
+  // excellent, very-good, good, fair, poor
+  estimatedValue: decimal("estimated_value", { precision: 10, scale: 2 }),
+  confidence: decimal("confidence", { precision: 4, scale: 2 }),
+  // 0.00 - 1.00
+  marketTrend: text("market_trend"),
+  // rising, stable, declining
+  createdAt: timestamp("created_at").defaultNow(),
+  reportData: json("report_data"),
+  status: text("status").default("pending"),
+  // pending, completed, failed
+  isPaid: boolean("is_paid").default(false),
+  requestSource: text("request_source").default("web")
+  // web, api
+});
+var payments = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  valuationId: integer("valuation_id").references(() => carValuations.id),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").default("EUR"),
+  status: text("status").default("pending"),
+  // pending, completed, failed, refunded
+  paymentMethod: text("payment_method"),
+  paymentDate: timestamp("payment_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+  transactionId: text("transaction_id"),
+  invoiceNumber: text("invoice_number")
+});
+var businessSubscriptions = pgTable("business_subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  plan: text("plan").notNull(),
+  // small, medium, large, enterprise
+  monthlyQuota: integer("monthly_quota").notNull(),
+  // Number of valuations included per month
+  startDate: timestamp("start_date").defaultNow(),
+  endDate: timestamp("end_date"),
+  status: text("status").default("active"),
+  // active, cancelled, expired
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  amount: decimal("amount", { precision: 10, scale: 2 }),
+  currency: text("currency").default("EUR"),
+  paymentFrequency: text("payment_frequency").default("monthly"),
+  // monthly, yearly
+  autoRenew: boolean("auto_renew").default(true)
+});
+var inquiries = pgTable("inquiries", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone"),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  status: text("status").default("unread"),
+  // unread, read, replied, archived
+  assignedTo: integer("assigned_to").references(() => users.id),
+  notes: text("notes")
+});
+var insertUserSchema = createInsertSchema(users).pick({
+  email: true,
+  password: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+  plan: true,
+  apiKey: true,
+  usageLimit: true
+});
+var insertCarValuationSchema = createInsertSchema(carValuations).pick({
+  userId: true,
+  clientEmail: true,
+  make: true,
+  model: true,
+  year: true,
+  mileage: true,
+  vin: true,
+  condition: true,
+  requestSource: true
+});
+var insertPaymentSchema = createInsertSchema(payments).pick({
+  userId: true,
+  valuationId: true,
+  amount: true,
+  currency: true,
+  paymentMethod: true
+});
+var insertBusinessSubscriptionSchema = createInsertSchema(businessSubscriptions).pick({
+  userId: true,
+  plan: true,
+  monthlyQuota: true,
+  endDate: true,
+  amount: true,
+  currency: true,
+  paymentFrequency: true
+});
+var insertInquirySchema = createInsertSchema(inquiries).pick({
+  name: true,
+  email: true,
+  phone: true,
+  message: true
+});
+
+// server/db.ts
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import ws from "ws";
+neonConfig.webSocketConstructor = ws;
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "DATABASE_URL must be set. Did you forget to provision a database?"
+  );
+}
+var pool = new Pool({ connectionString: process.env.DATABASE_URL });
+var db = drizzle({ client: pool, schema: schema_exports });
+
+// server/storage.ts
+import { eq, desc, and, sql } from "drizzle-orm";
+import { v4 as uuidv4 } from "uuid";
+var DatabaseStorage = class {
+  // User operations
+  async getUser(id) {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+  async getUserByEmail(email) {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+  // For backwards compatibility
+  async getUserByUsername(username) {
+    const [user] = await db.select().from(users).where(eq(users.email, username));
+    return user;
+  }
+  async getUserByApiKey(apiKey) {
+    const [user] = await db.select().from(users).where(eq(users.apiKey, apiKey));
+    return user;
+  }
+  async createUser(insertUser) {
+    const [user] = await db.insert(users).values(insertUser).returning();
+    return user;
+  }
+  async updateUser(id, userData) {
+    const [updatedUser] = await db.update(users).set({
+      ...userData,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(users.id, id)).returning();
+    return updatedUser;
+  }
+  async getAllUsers() {
+    return db.select().from(users).orderBy(desc(users.createdAt));
+  }
+  async generateApiKey(userId) {
+    const apiKey = `cva_${uuidv4().replace(/-/g, "")}`;
+    await this.updateUser(userId, { apiKey });
+    return apiKey;
+  }
+  // Car valuation operations
+  async getCarValuation(id) {
+    const [valuation] = await db.select().from(carValuations).where(eq(carValuations.id, id));
+    return valuation;
+  }
+  async getUserCarValuations(userId) {
+    return db.select().from(carValuations).where(eq(carValuations.userId, userId));
+  }
+  async createCarValuation(valuation) {
+    const [newValuation] = await db.insert(carValuations).values(valuation).returning();
+    return newValuation;
+  }
+  async updateCarValuation(id, valuation) {
+    const [updatedValuation] = await db.update(carValuations).set(valuation).where(eq(carValuations.id, id)).returning();
+    return updatedValuation;
+  }
+  async getAllCarValuations(limit = 100) {
+    return db.select().from(carValuations).orderBy(desc(carValuations.createdAt)).limit(limit);
+  }
+  // Payment operations
+  async createPayment(payment) {
+    const [newPayment] = await db.insert(payments).values(payment).returning();
+    return newPayment;
+  }
+  async getPayment(id) {
+    const [payment] = await db.select().from(payments).where(eq(payments.id, id));
+    return payment;
+  }
+  async getUserPayments(userId) {
+    return db.select().from(payments).where(eq(payments.userId, userId));
+  }
+  async updatePayment(id, paymentData) {
+    const [updatedPayment] = await db.update(payments).set(paymentData).where(eq(payments.id, id)).returning();
+    return updatedPayment;
+  }
+  async getAllPayments(limit = 100) {
+    return db.select().from(payments).orderBy(desc(payments.createdAt)).limit(limit);
+  }
+  // Business subscription operations
+  async createBusinessSubscription(subscription) {
+    const [newSubscription] = await db.insert(businessSubscriptions).values(subscription).returning();
+    return newSubscription;
+  }
+  async getBusinessSubscription(id) {
+    const [subscription] = await db.select().from(businessSubscriptions).where(eq(businessSubscriptions.id, id));
+    return subscription;
+  }
+  async getUserBusinessSubscription(userId) {
+    const [subscription] = await db.select().from(businessSubscriptions).where(and(
+      eq(businessSubscriptions.userId, userId),
+      eq(businessSubscriptions.status, "active")
+    ));
+    return subscription;
+  }
+  async updateBusinessSubscription(id, subscriptionData) {
+    const [updatedSubscription] = await db.update(businessSubscriptions).set({
+      ...subscriptionData,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(businessSubscriptions.id, id)).returning();
+    return updatedSubscription;
+  }
+  // Inquiry operations
+  async createInquiry(inquiry) {
+    const [newInquiry] = await db.insert(inquiries).values(inquiry).returning();
+    return newInquiry;
+  }
+  async getInquiry(id) {
+    const [inquiry] = await db.select().from(inquiries).where(eq(inquiries.id, id));
+    return inquiry;
+  }
+  async getAllInquiries(limit = 100) {
+    return db.select().from(inquiries).orderBy(desc(inquiries.createdAt)).limit(limit);
+  }
+  async updateInquiry(id, inquiryData) {
+    const [updatedInquiry] = await db.update(inquiries).set(inquiryData).where(eq(inquiries.id, id)).returning();
+    return updatedInquiry;
+  }
+  // Admin dashboard stats
+  async getDashboardStats() {
+    const [userResult] = await db.select({ count: sql`count(*)` }).from(users);
+    const totalUsers = Number(userResult?.count || 0);
+    const [valuationResult] = await db.select({ count: sql`count(*)` }).from(carValuations);
+    const totalValuations = Number(valuationResult?.count || 0);
+    const [paymentResult] = await db.select({ count: sql`count(*)` }).from(payments);
+    const totalPayments = Number(paymentResult?.count || 0);
+    const [inquiryResult] = await db.select({ count: sql`count(*)` }).from(inquiries);
+    const totalInquiries = Number(inquiryResult?.count || 0);
+    const today = /* @__PURE__ */ new Date();
+    today.setHours(0, 0, 0, 0);
+    const [todayResult] = await db.select({ sum: sql`coalesce(sum(amount), 0)` }).from(payments).where(and(
+      sql`payment_date >= ${today}`,
+      eq(payments.status, "completed")
+    ));
+    const revenueToday = Number(todayResult?.sum || 0);
+    const startOfMonth = /* @__PURE__ */ new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const [monthResult] = await db.select({ sum: sql`coalesce(sum(amount), 0)` }).from(payments).where(and(
+      sql`payment_date >= ${startOfMonth}`,
+      eq(payments.status, "completed")
+    ));
+    const revenueThisMonth = Number(monthResult?.sum || 0);
+    return {
+      totalUsers,
+      totalValuations,
+      totalPayments,
+      totalInquiries,
+      revenueToday,
+      revenueThisMonth
+    };
+  }
+};
+var storage = new DatabaseStorage();
+
+// server/routes.ts
+import { z } from "zod";
+
+// server/auth.ts
+import * as bcrypt from "bcrypt";
+var SALT_ROUNDS = 10;
+async function hashPassword(password) {
+  return bcrypt.hash(password, SALT_ROUNDS);
+}
+async function comparePassword(plainTextPassword, hashedPassword) {
+  return bcrypt.compare(plainTextPassword, hashedPassword);
+}
+
+// server/routes.ts
+async function generateCarValuation(make, model, year, mileage, condition, vin) {
+  const basePriceMap = {
+    "audi": 15e3,
+    "bmw": 17e3,
+    "mercedes": 18e3,
+    "volkswagen": 12e3,
+    "toyota": 13e3,
+    "other": 1e4
+  };
+  const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+  const age = currentYear - year;
+  const ageFactor = Math.max(0.5, 1 - age * 0.05);
+  const mileageFactor = Math.max(0.5, 1 - mileage / 3e5);
+  const conditionFactors = {
+    "excellent": 1.2,
+    "very-good": 1.1,
+    "good": 1,
+    "fair": 0.85,
+    "poor": 0.7
+  };
+  const vinFactor = vin && vin.length >= 17 ? 1.03 : 1;
+  const basePrice = basePriceMap[make.toLowerCase()] || basePriceMap.other;
+  const estimatedValue = Math.round(basePrice * ageFactor * mileageFactor * conditionFactors[condition]);
+  let marketTrend = "stable";
+  if (age < 3) {
+    marketTrend = "declining";
+  } else if (make.toLowerCase() === "toyota" || make.toLowerCase() === "volkswagen") {
+    marketTrend = "rising";
+  }
+  const vinConfidenceBoost = vin && vin.length >= 17 ? 0.08 : 0;
+  const confidence = Math.min(0.95, Math.max(0.6, 0.9 - age * 0.01 - mileage / 5e5 + vinConfidenceBoost));
+  const randomFactor = 0.9 + Math.random() * 0.2;
+  const finalValue = Math.round(estimatedValue * randomFactor * vinFactor);
+  const minPrice = Math.round(finalValue * 0.85);
+  const maxPrice = Math.round(finalValue * 1.15);
+  return {
+    estimatedValue: finalValue,
+    confidence: parseFloat(confidence.toFixed(2)),
+    marketTrend,
+    reportData: {
+      estimatedValue: finalValue,
+      priceRange: {
+        min: minPrice,
+        max: maxPrice
+      },
+      confidence: parseFloat(confidence.toFixed(2)),
+      marketTrend,
+      analysis: `This ${year} ${make} ${model} with ${mileage}km in ${condition} condition is valued at approximately \u20AC${finalValue}. The value could range between \u20AC${minPrice} and \u20AC${maxPrice} depending on specific factors like exact trim level, service history, and local market conditions.`,
+      comparableListings: [
+        {
+          year: year - 1,
+          make,
+          model,
+          mileage: mileage - 15e3,
+          price: finalValue + 2e3,
+          source: "mobile.bg"
+        },
+        {
+          year,
+          make,
+          model,
+          mileage: mileage + 2e4,
+          price: finalValue - 1500,
+          source: "cars.bg"
+        },
+        {
+          year: year + 1,
+          make,
+          model,
+          mileage: mileage - 3e4,
+          price: finalValue + 4e3,
+          source: "Facebook Marketplace"
+        }
+      ],
+      marketDemand: Math.floor(Math.random() * 5) + 5,
+      // Random 5-10 rating
+      insights: [
+        "Bulgarian buyers typically prioritize fuel efficiency and lower maintenance costs.",
+        "Diesel engines remain popular in the Bulgarian market despite European trends.",
+        "Models with good parts availability and service network command premium prices.",
+        "Cars with service history from authorized dealers tend to sell faster."
+      ]
+    }
+  };
+}
+async function registerRoutes(app2) {
+  app2.post("/api/register", async (req, res) => {
+    try {
+      const userData = insertUserSchema.parse(req.body);
+      const hashedPassword = await hashPassword(userData.password);
+      const trialEndDate = /* @__PURE__ */ new Date();
+      trialEndDate.setDate(trialEndDate.getDate() + 60);
+      const user = await storage.createUser({
+        ...userData,
+        password: hashedPassword,
+        role: "user",
+        plan: "free"
+        // Default plan
+      });
+      const { password, ...userWithoutPassword } = user;
+      res.status(201).json(userWithoutPassword);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        console.error("Registration error:", error);
+        res.status(500).json({ error: "Failed to register user" });
+      }
+    }
+  });
+  app2.post("/api/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      const passwordMatch = await comparePassword(password, user.password);
+      if (!passwordMatch) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      const { password: _, ...userWithoutPassword } = user;
+      res.status(200).json({ user: userWithoutPassword });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Failed to log in" });
+    }
+  });
+  app2.post("/api/valuations", async (req, res) => {
+    try {
+      const valuationData = insertCarValuationSchema.parse(req.body);
+      const carValuation = await generateCarValuation(
+        valuationData.make,
+        valuationData.model,
+        Number(valuationData.year),
+        Number(valuationData.mileage),
+        valuationData.condition,
+        valuationData.vin
+        // Pass VIN for more accurate valuation if available
+      );
+      const fullValuationData = {
+        ...valuationData,
+        estimatedValue: carValuation.estimatedValue,
+        confidence: carValuation.confidence,
+        marketTrend: carValuation.marketTrend,
+        reportData: carValuation.reportData,
+        status: "completed"
+      };
+      const valuation = await storage.createCarValuation(fullValuationData);
+      res.status(201).json(valuation);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        console.error("Valuation creation error:", error);
+        res.status(500).json({ error: "Failed to create valuation" });
+      }
+    }
+  });
+  app2.get("/api/valuations/:id", async (req, res) => {
+    try {
+      const valuation = await storage.getCarValuation(Number(req.params.id));
+      if (!valuation) {
+        return res.status(404).json({ error: "Valuation not found" });
+      }
+      res.json(valuation);
+    } catch (error) {
+      console.error("Get valuation error:", error);
+      res.status(500).json({ error: "Failed to retrieve valuation" });
+    }
+  });
+  app2.get("/api/users/:userId/valuations", async (req, res) => {
+    try {
+      const valuations = await storage.getUserCarValuations(Number(req.params.userId));
+      res.json(valuations);
+    } catch (error) {
+      console.error("Get user valuations error:", error);
+      res.status(500).json({ error: "Failed to retrieve user valuations" });
+    }
+  });
+  app2.post("/api/business-subscriptions", async (req, res) => {
+    try {
+      const subscriptionData = insertBusinessSubscriptionSchema.parse(req.body);
+      if (!subscriptionData.endDate) {
+        const endDate = /* @__PURE__ */ new Date();
+        if (subscriptionData.paymentFrequency === "monthly") {
+          endDate.setMonth(endDate.getMonth() + 1);
+        } else if (subscriptionData.paymentFrequency === "yearly") {
+          endDate.setFullYear(endDate.getFullYear() + 1);
+        } else {
+          endDate.setMonth(endDate.getMonth() + 1);
+        }
+        subscriptionData.endDate = endDate;
+      }
+      const subscription = await storage.createBusinessSubscription(subscriptionData);
+      if (subscriptionData.userId) {
+        await storage.updateUser(subscriptionData.userId, {
+          plan: "business"
+        });
+      }
+      res.status(201).json(subscription);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        console.error("Business subscription creation error:", error);
+        res.status(500).json({ error: "Failed to create business subscription" });
+      }
+    }
+  });
+  app2.get("/api/users/:userId/business-subscription", async (req, res) => {
+    try {
+      const subscription = await storage.getUserBusinessSubscription(Number(req.params.userId));
+      if (!subscription) {
+        return res.status(404).json({ error: "Business subscription not found" });
+      }
+      res.json(subscription);
+    } catch (error) {
+      console.error("Get business subscription error:", error);
+      res.status(500).json({ error: "Failed to retrieve business subscription" });
+    }
+  });
+  app2.post("/api/payments", async (req, res) => {
+    try {
+      const paymentData = insertPaymentSchema.parse(req.body);
+      const paymentWithDate = {
+        ...paymentData
+        // We'll handle paymentDate in the storage layer
+      };
+      const payment = await storage.createPayment(paymentWithDate);
+      if (payment.valuationId) {
+        await storage.updateCarValuation(payment.valuationId, {
+          isPaid: true
+        });
+      }
+      res.status(201).json(payment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        console.error("Payment creation error:", error);
+        res.status(500).json({ error: "Failed to create payment" });
+      }
+    }
+  });
+  app2.get("/api/users/:userId/payments", async (req, res) => {
+    try {
+      const payments2 = await storage.getUserPayments(Number(req.params.userId));
+      res.json(payments2);
+    } catch (error) {
+      console.error("Get user payments error:", error);
+      res.status(500).json({ error: "Failed to retrieve user payments" });
+    }
+  });
+  app2.post("/api/quick-valuation", async (req, res) => {
+    try {
+      const { make, model, year, mileage, condition, vin } = req.body;
+      if (!make || !model || !year || !mileage || !condition) {
+        return res.status(400).json({ error: "All car details are required" });
+      }
+      const carValuation = await generateCarValuation(
+        make,
+        model,
+        Number(year),
+        Number(mileage),
+        condition,
+        vin
+        // Pass the optional VIN for more accurate valuation
+      );
+      res.json({
+        estimatedValue: carValuation.estimatedValue,
+        confidence: carValuation.confidence,
+        marketTrend: carValuation.marketTrend,
+        summary: carValuation.reportData.analysis || "Car valuation analysis completed"
+      });
+    } catch (error) {
+      console.error("Quick valuation error:", error);
+      res.status(500).json({ error: "Failed to generate quick valuation" });
+    }
+  });
+  const isAdmin = async (req, res, next) => {
+    next();
+  };
+  app2.get("/api/admin/dashboard", isAdmin, async (req, res) => {
+    try {
+      const stats = {
+        totalUsers: 5,
+        totalValuations: 12,
+        totalPayments: 8,
+        totalInquiries: 3,
+        revenueToday: 44.97,
+        revenueThisMonth: 349.85
+      };
+      res.json(stats);
+    } catch (error) {
+      console.error("Dashboard stats error:", error);
+      res.status(500).json({ error: "Failed to retrieve dashboard stats" });
+    }
+  });
+  app2.get("/api/admin/users", isAdmin, async (req, res) => {
+    try {
+      const mockUsers = [
+        {
+          id: 1,
+          username: "admin",
+          email: "admin@carvalueai.com",
+          firstName: "Admin",
+          lastName: "User",
+          role: "admin",
+          plan: "business",
+          apiKey: "cva_1a2b3c4d5e6f7g8h9i0j",
+          usageLimit: 1e3,
+          usageCount: 45,
+          isActive: true,
+          createdAt: (/* @__PURE__ */ new Date("2023-01-15")).toISOString(),
+          lastLoginAt: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        {
+          id: 2,
+          username: "ivan",
+          email: "ivan@example.com",
+          firstName: "Ivan",
+          lastName: "Petrov",
+          role: "user",
+          plan: "premium",
+          apiKey: null,
+          usageLimit: null,
+          usageCount: 0,
+          isActive: true,
+          createdAt: (/* @__PURE__ */ new Date("2023-03-22")).toISOString(),
+          lastLoginAt: (/* @__PURE__ */ new Date("2023-05-10")).toISOString()
+        },
+        {
+          id: 3,
+          username: "dealer",
+          email: "dealer@cardealership.bg",
+          firstName: "Auto",
+          lastName: "Dealer",
+          role: "user",
+          plan: "business",
+          apiKey: "cva_9i8h7g6f5e4d3c2b1a0",
+          usageLimit: 500,
+          usageCount: 327,
+          isActive: true,
+          createdAt: (/* @__PURE__ */ new Date("2023-02-10")).toISOString(),
+          lastLoginAt: (/* @__PURE__ */ new Date("2023-05-12")).toISOString()
+        }
+      ];
+      res.json(mockUsers);
+    } catch (error) {
+      console.error("Get all users error:", error);
+      res.status(500).json({ error: "Failed to retrieve users" });
+    }
+  });
+  app2.patch("/api/admin/users/:id", isAdmin, async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
+      const userData = req.body;
+      if (userData.password) {
+        delete userData.password;
+      }
+      const updatedUser = await storage.updateUser(userId, userData);
+      const { password, ...userWithoutPassword } = updatedUser;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      console.error("Update user error:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+  app2.post("/api/admin/users/:id/generate-api-key", isAdmin, async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const apiKey = await storage.generateApiKey(userId);
+      res.json({ apiKey });
+    } catch (error) {
+      console.error("API key generation error:", error);
+      res.status(500).json({ error: "Failed to generate API key" });
+    }
+  });
+  app2.get("/api/admin/inquiries", isAdmin, async (req, res) => {
+    try {
+      const mockInquiries = [
+        {
+          id: 1,
+          name: "Ivan Petrov",
+          email: "ivan@example.com",
+          phone: "+359888123456",
+          message: "I would like to know more about your business subscription plans. I run a car dealership in Sofia and I need to value multiple cars each month.",
+          createdAt: (/* @__PURE__ */ new Date("2023-05-12T10:30:00")).toISOString(),
+          status: "unread",
+          assignedTo: null,
+          notes: null
+        },
+        {
+          id: 2,
+          name: "Maria Dimitrova",
+          email: "maria@example.com",
+          phone: "+359877456789",
+          message: "I want to sell my car and need an accurate valuation. Do you provide valuations for private sellers?",
+          createdAt: (/* @__PURE__ */ new Date("2023-05-11T14:22:00")).toISOString(),
+          status: "read",
+          assignedTo: 1,
+          notes: "Responded via email about our regular plan"
+        },
+        {
+          id: 3,
+          name: "Stefan Georgiev",
+          email: "stefan@example.com",
+          phone: "+359899789123",
+          message: "I am interested in your API for our automobile website. Can you provide pricing for 50 valuations per day?",
+          createdAt: (/* @__PURE__ */ new Date("2023-05-10T09:15:00")).toISOString(),
+          status: "replied",
+          assignedTo: 1,
+          notes: "Sent business plan proposal with API documentation"
+        }
+      ];
+      res.json(mockInquiries);
+    } catch (error) {
+      console.error("Get all inquiries error:", error);
+      res.status(500).json({ error: "Failed to retrieve inquiries" });
+    }
+  });
+  app2.patch("/api/admin/inquiries/:id", isAdmin, async (req, res) => {
+    try {
+      const inquiryId = Number(req.params.id);
+      const inquiryData = req.body;
+      const updatedInquiry = await storage.updateInquiry(inquiryId, inquiryData);
+      res.json(updatedInquiry);
+    } catch (error) {
+      console.error("Update inquiry error:", error);
+      res.status(500).json({ error: "Failed to update inquiry" });
+    }
+  });
+  app2.get("/api/admin/valuations", isAdmin, async (req, res) => {
+    try {
+      const mockValuations = [
+        {
+          id: 1,
+          userId: 2,
+          clientEmail: null,
+          make: "BMW",
+          model: "530i",
+          year: 2019,
+          mileage: 85e3,
+          condition: "good",
+          estimatedValue: "28500.00",
+          confidence: "0.85",
+          marketTrend: "stable",
+          createdAt: (/* @__PURE__ */ new Date("2023-05-12T10:45:00")).toISOString(),
+          status: "completed",
+          isPaid: true,
+          requestSource: "web"
+        },
+        {
+          id: 2,
+          userId: 3,
+          clientEmail: "client@example.com",
+          make: "Audi",
+          model: "A4",
+          year: 2018,
+          mileage: 95e3,
+          condition: "very-good",
+          estimatedValue: "22800.00",
+          confidence: "0.82",
+          marketTrend: "rising",
+          createdAt: (/* @__PURE__ */ new Date("2023-05-11T16:30:00")).toISOString(),
+          status: "completed",
+          isPaid: true,
+          requestSource: "api"
+        },
+        {
+          id: 3,
+          userId: 3,
+          clientEmail: "another@example.com",
+          make: "Mercedes",
+          model: "C200",
+          year: 2020,
+          mileage: 45e3,
+          condition: "excellent",
+          estimatedValue: "32500.00",
+          confidence: "0.90",
+          marketTrend: "stable",
+          createdAt: (/* @__PURE__ */ new Date("2023-05-10T14:15:00")).toISOString(),
+          status: "completed",
+          isPaid: true,
+          requestSource: "api"
+        },
+        {
+          id: 4,
+          userId: null,
+          clientEmail: null,
+          make: "Volkswagen",
+          model: "Golf",
+          year: 2017,
+          mileage: 11e4,
+          condition: "fair",
+          estimatedValue: "14800.00",
+          confidence: "0.78",
+          marketTrend: "declining",
+          createdAt: (/* @__PURE__ */ new Date("2023-05-13T09:10:00")).toISOString(),
+          status: "completed",
+          isPaid: false,
+          requestSource: "web"
+        }
+      ];
+      res.json(mockValuations);
+    } catch (error) {
+      console.error("Get all valuations error:", error);
+      res.status(500).json({ error: "Failed to retrieve valuations" });
+    }
+  });
+  app2.get("/api/admin/payments", isAdmin, async (req, res) => {
+    try {
+      const mockPayments = [
+        {
+          id: 1,
+          userId: 2,
+          valuationId: 1,
+          amount: "14.99",
+          currency: "EUR",
+          status: "completed",
+          paymentMethod: "credit_card",
+          paymentDate: (/* @__PURE__ */ new Date("2023-05-12T11:30:00")).toISOString(),
+          createdAt: (/* @__PURE__ */ new Date("2023-05-12T11:30:00")).toISOString(),
+          transactionId: "txn_1234567890",
+          invoiceNumber: "INV-2023-001"
+        },
+        {
+          id: 2,
+          userId: 3,
+          valuationId: 2,
+          amount: "29.99",
+          currency: "EUR",
+          status: "completed",
+          paymentMethod: "paypal",
+          paymentDate: (/* @__PURE__ */ new Date("2023-05-11T17:00:00")).toISOString(),
+          createdAt: (/* @__PURE__ */ new Date("2023-05-11T17:00:00")).toISOString(),
+          transactionId: "txn_0987654321",
+          invoiceNumber: "INV-2023-002"
+        },
+        {
+          id: 3,
+          userId: 3,
+          valuationId: 3,
+          amount: "29.99",
+          currency: "EUR",
+          status: "completed",
+          paymentMethod: "credit_card",
+          paymentDate: (/* @__PURE__ */ new Date("2023-05-10T15:00:00")).toISOString(),
+          createdAt: (/* @__PURE__ */ new Date("2023-05-10T15:00:00")).toISOString(),
+          transactionId: "txn_1122334455",
+          invoiceNumber: "INV-2023-003"
+        },
+        {
+          id: 4,
+          userId: 2,
+          valuationId: null,
+          amount: "14.99",
+          currency: "EUR",
+          status: "pending",
+          paymentMethod: "bank_transfer",
+          paymentDate: null,
+          createdAt: (/* @__PURE__ */ new Date("2023-05-13T10:00:00")).toISOString(),
+          transactionId: null,
+          invoiceNumber: "INV-2023-004"
+        }
+      ];
+      res.json(mockPayments);
+    } catch (error) {
+      console.error("Get all payments error:", error);
+      res.status(500).json({ error: "Failed to retrieve payments" });
+    }
+  });
+  app2.post("/api/inquiries", async (req, res) => {
+    try {
+      const inquiryData = insertInquirySchema.parse(req.body);
+      const inquiry = await storage.createInquiry(inquiryData);
+      res.status(201).json(inquiry);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        console.error("Inquiry creation error:", error);
+        res.status(500).json({ error: "Failed to create inquiry" });
+      }
+    }
+  });
+  const httpServer = createServer(app2);
+  return httpServer;
+}
+
+// server/vite.ts
+import express from "express";
+import fs from "fs";
+import path2 from "path";
+import { createServer as createViteServer, createLogger } from "vite";
+
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+var vite_config_default = defineConfig({
+  plugins: [
+    react(),
+    runtimeErrorOverlay(),
+    ...process.env.NODE_ENV !== "production" && process.env.REPL_ID !== void 0 ? [
+      await import("@replit/vite-plugin-cartographer").then(
+        (m) => m.cartographer()
+      )
+    ] : []
+  ],
+  resolve: {
+    alias: {
+      "@": path.resolve(import.meta.dirname, "client", "src"),
+      "@shared": path.resolve(import.meta.dirname, "shared"),
+      "@assets": path.resolve(import.meta.dirname, "attached_assets")
+    }
+  },
+  root: path.resolve(import.meta.dirname, "client"),
+  build: {
+    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    emptyOutDir: true
+  }
+});
+
+// server/vite.ts
+import { nanoid } from "nanoid";
+var viteLogger = createLogger();
+function log(message, source = "express") {
+  const formattedTime = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
+async function setupVite(app2, server) {
+  const serverOptions = {
+    middlewareMode: true,
+    hmr: { server },
+    allowedHosts: true
+  };
+  const vite = await createViteServer({
+    ...vite_config_default,
+    configFile: false,
+    customLogger: {
+      ...viteLogger,
+      error: (msg, options) => {
+        viteLogger.error(msg, options);
+        process.exit(1);
+      }
+    },
+    server: serverOptions,
+    appType: "custom"
+  });
+  app2.use(vite.middlewares);
+  app2.use("*", async (req, res, next) => {
+    const url = req.originalUrl;
+    try {
+      const clientTemplate = path2.resolve(
+        import.meta.dirname,
+        "..",
+        "client",
+        "index.html"
+      );
+      let template = await fs.promises.readFile(clientTemplate, "utf-8");
+      template = template.replace(
+        `src="/src/main.tsx"`,
+        `src="/src/main.tsx?v=${nanoid()}"`
+      );
+      const page = await vite.transformIndexHtml(url, template);
+      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+}
+function serveStatic(app2) {
+  const distPath = path2.resolve(import.meta.dirname, "public");
+  if (!fs.existsSync(distPath)) {
+    throw new Error(
+      `Could not find the build directory: ${distPath}, make sure to build the client first`
+    );
+  }
+  app2.use(express.static(distPath));
+  app2.use("*", (_req, res) => {
+    res.sendFile(path2.resolve(distPath, "index.html"));
+  });
+}
+
+// server/index.ts
+var app = express2();
+app.use(express2.json());
+app.use(express2.urlencoded({ extended: false }));
+app.use((req, res, next) => {
+  const start = Date.now();
+  const path3 = req.path;
+  let capturedJsonResponse = void 0;
+  const originalResJson = res.json;
+  res.json = function(bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (path3.startsWith("/api")) {
+      let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+      if (logLine.length > 80) {
+        logLine = logLine.slice(0, 79) + "\u2026";
+      }
+      log(logLine);
+    }
+  });
+  next();
+});
+(async () => {
+  const server = await registerRoutes(app);
+  app.use((err, _req, res, _next) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+    res.status(status).json({ message });
+    throw err;
+  });
+  if (app.get("env") === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+  const port = 5e3;
+  server.listen({
+    port,
+    host: "0.0.0.0",
+    reusePort: true
+  }, () => {
+    log(`serving on port ${port}`);
+  });
+})();
