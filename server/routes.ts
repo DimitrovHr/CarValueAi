@@ -182,13 +182,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const valuationData = insertCarValuationSchema.parse(req.body);
       
-      // Generate valuation for the car
+      // Generate valuation for the car, using VIN if provided
       const carValuation = await generateCarValuation(
         valuationData.make,
         valuationData.model,
         Number(valuationData.year),
         Number(valuationData.mileage),
-        valuationData.condition
+        valuationData.condition,
+        valuationData.vin // Pass VIN for more accurate valuation if available
       );
       
       // Combine the user input with valuation
