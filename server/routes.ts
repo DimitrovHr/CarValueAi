@@ -235,32 +235,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Subscription routes
-  app.post('/api/subscriptions', async (req, res) => {
+  // Business Subscription routes
+  app.post('/api/business-subscriptions', async (req, res) => {
     try {
-      const subscriptionData = insertSubscriptionSchema.parse(req.body);
+      const subscriptionData = insertBusinessSubscriptionSchema.parse(req.body);
       
-      // Calculate end date based on plan type if not provided
+      // Calculate end date based on payment frequency if not provided
       if (!subscriptionData.endDate) {
         const endDate = new Date();
         
-        if (subscriptionData.planId === "regular") {
-          endDate.setDate(endDate.getDate() + 7); // 1 week for regular
-        } else if (subscriptionData.planId === "premium") {
-          endDate.setMonth(endDate.getMonth() + 1); // 1 month for premium
-        } else if (subscriptionData.planId === "business") {
-          endDate.setMonth(endDate.getMonth() + 1); // 1 month for business
+        if (subscriptionData.paymentFrequency === "monthly") {
+          endDate.setMonth(endDate.getMonth() + 1);
+        } else if (subscriptionData.paymentFrequency === "yearly") {
+          endDate.setFullYear(endDate.getFullYear() + 1);
+        } else {
+          // Default to monthly
+          endDate.setMonth(endDate.getMonth() + 1);
         }
         
         subscriptionData.endDate = endDate;
       }
       
-      const subscription = await storage.createSubscription(subscriptionData);
+      const subscription = await storage.createBusinessSubscription(subscriptionData);
       
-      // Update user plan information if user ID is provided
+      // Update user plan information
       if (subscriptionData.userId) {
-        const user = await storage.getUser(subscriptionData.userId);
-        // In a real app, would update the user's plan information here
+        await storage.updateUser(subscriptionData.userId, {
+          plan: "business"
+        });
       }
       
       res.status(201).json(subscription);
@@ -268,24 +270,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: error.errors });
       } else {
-        console.error("Subscription creation error:", error);
-        res.status(500).json({ error: "Failed to create subscription" });
+        console.error("Business subscription creation error:", error);
+        res.status(500).json({ error: "Failed to create business subscription" });
       }
     }
   });
   
-  app.get('/api/users/:userId/subscription', async (req, res) => {
+  app.get('/api/users/:userId/business-subscription', async (req, res) => {
     try {
-      const subscription = await storage.getUserSubscription(Number(req.params.userId));
+      const subscription = await storage.getUserBusinessSubscription(Number(req.params.userId));
       
       if (!subscription) {
-        return res.status(404).json({ error: "Subscription not found" });
+        return res.status(404).json({ error: "Business subscription not found" });
       }
       
       res.json(subscription);
     } catch (error) {
-      console.error("Get subscription error:", error);
-      res.status(500).json({ error: "Failed to retrieve subscription" });
+      console.error("Get business subscription error:", error);
+      res.status(500).json({ error: "Failed to retrieve business subscription" });
+    }
+  });
+  
+  // Payment routes
+  app.post('/api/payments', async (req, res) => {
+    try {
+      const paymentData = insertPaymentSchema.parse(req.body);
+      
+      const payment = await storage.createPayment({
+        ...paymentData,
+        paymentDate: new Date()
+      });
+      
+      // If this payment is for a valuation, mark it as paid
+      if (payment.valuationId) {
+        await storage.updateCarValuation(payment.valuationId, {
+          isPaid: true
+        });
+      }
+      
+      res.status(201).json(payment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        console.error("Payment creation error:", error);
+        res.status(500).json({ error: "Failed to create payment" });
+      }
+    }
+  });
+  
+  app.get('/api/users/:userId/payments', async (req, res) => {
+    try {
+      const payments = await storage.getUserPayments(Number(req.params.userId));
+      res.json(payments);
+    } catch (error) {
+      console.error("Get user payments error:", error);
+      res.status(500).json({ error: "Failed to retrieve user payments" });
     }
   });
 
@@ -316,6 +356,163 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Quick valuation error:", error);
       res.status(500).json({ error: "Failed to generate quick valuation" });
+    }
+  });
+  
+  // Admin routes - protected with admin role check middleware
+  const isAdmin = async (req: Request, res: Response, next: Function) => {
+    try {
+      // For simplicity using query param, in production would use a session or JWT
+      const userId = req.query.userId || req.body.userId;
+      
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
+      const user = await storage.getUser(Number(userId));
+      
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden - Admin access required" });
+      }
+      
+      next();
+    } catch (error) {
+      console.error("Auth error:", error);
+      res.status(500).json({ error: "Authentication error" });
+    }
+  };
+  
+  // Admin Dashboard Stats
+  app.get('/api/admin/dashboard', isAdmin, async (req, res) => {
+    try {
+      const stats = await storage.getDashboardStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Dashboard stats error:", error);
+      res.status(500).json({ error: "Failed to retrieve dashboard stats" });
+    }
+  });
+  
+  // Admin User Management
+  app.get('/api/admin/users', isAdmin, async (req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      // Remove passwords from response
+      const sanitizedUsers = users.map(user => {
+        const { password, ...userWithoutPassword } = user;
+        return userWithoutPassword;
+      });
+      
+      res.json(sanitizedUsers);
+    } catch (error) {
+      console.error("Get all users error:", error);
+      res.status(500).json({ error: "Failed to retrieve users" });
+    }
+  });
+  
+  app.patch('/api/admin/users/:id', isAdmin, async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
+      const userData = req.body;
+      
+      // Make sure we don't try to update password through this endpoint
+      if (userData.password) {
+        delete userData.password;
+      }
+      
+      const updatedUser = await storage.updateUser(userId, userData);
+      
+      // Remove password from response
+      const { password, ...userWithoutPassword } = updatedUser;
+      
+      res.json(userWithoutPassword);
+    } catch (error) {
+      console.error("Update user error:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+  
+  // API Key Generation for Business Clients
+  app.post('/api/admin/users/:id/generate-api-key', isAdmin, async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const apiKey = await storage.generateApiKey(userId);
+      
+      res.json({ apiKey });
+    } catch (error) {
+      console.error("API key generation error:", error);
+      res.status(500).json({ error: "Failed to generate API key" });
+    }
+  });
+  
+  // Admin Inquiry Management
+  app.get('/api/admin/inquiries', isAdmin, async (req, res) => {
+    try {
+      const inquiries = await storage.getAllInquiries();
+      res.json(inquiries);
+    } catch (error) {
+      console.error("Get all inquiries error:", error);
+      res.status(500).json({ error: "Failed to retrieve inquiries" });
+    }
+  });
+  
+  app.patch('/api/admin/inquiries/:id', isAdmin, async (req, res) => {
+    try {
+      const inquiryId = Number(req.params.id);
+      const inquiryData = req.body;
+      
+      const updatedInquiry = await storage.updateInquiry(inquiryId, inquiryData);
+      
+      res.json(updatedInquiry);
+    } catch (error) {
+      console.error("Update inquiry error:", error);
+      res.status(500).json({ error: "Failed to update inquiry" });
+    }
+  });
+  
+  // Admin Valuation Management
+  app.get('/api/admin/valuations', isAdmin, async (req, res) => {
+    try {
+      const valuations = await storage.getAllCarValuations();
+      res.json(valuations);
+    } catch (error) {
+      console.error("Get all valuations error:", error);
+      res.status(500).json({ error: "Failed to retrieve valuations" });
+    }
+  });
+  
+  // Admin Payment Management
+  app.get('/api/admin/payments', isAdmin, async (req, res) => {
+    try {
+      const payments = await storage.getAllPayments();
+      res.json(payments);
+    } catch (error) {
+      console.error("Get all payments error:", error);
+      res.status(500).json({ error: "Failed to retrieve payments" });
+    }
+  });
+  
+  // Inquiry creation endpoint (from contact form)
+  app.post('/api/inquiries', async (req, res) => {
+    try {
+      const inquiryData = insertInquirySchema.parse(req.body);
+      
+      const inquiry = await storage.createInquiry(inquiryData);
+      
+      res.status(201).json(inquiry);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: error.errors });
+      } else {
+        console.error("Inquiry creation error:", error);
+        res.status(500).json({ error: "Failed to create inquiry" });
+      }
     }
   });
 
