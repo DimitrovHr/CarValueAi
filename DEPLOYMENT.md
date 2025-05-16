@@ -1,76 +1,74 @@
-# Deploying CarValueAI to Vercel
+# Deploying CarValueAI
 
-This guide will walk you through the process of deploying your CarValueAI application to Vercel.
+This guide explains how to deploy the CarValueAI application to production.
 
-## Prerequisites
+## Application Architecture
 
-- A GitHub account with your repository uploaded
-- A Vercel account (you can sign up with your GitHub account)
-- A PostgreSQL database (we recommend Neon, Supabase, or Railway)
+CarValueAI consists of two parts:
+- **Frontend**: React + Vite application
+- **Backend**: Express API server with PostgreSQL database
 
-## Step 1: Prepare Your Database
+For the best deployment experience, these should be deployed separately.
 
-1. Set up a PostgreSQL database in your preferred service
-2. Make sure your database is accessible from the internet
-3. Keep the database connection string handy for the next steps
+## Option 1: Frontend on Vercel, Backend on a separate service
 
-## Step 2: Deploy to Vercel
+### Step 1: Deploy the Backend (Express API)
 
-1. Log in to [Vercel](https://vercel.com)
-2. Click "Add New" → "Project"
-3. Connect your GitHub account and select your CarValueAI repository
-4. Configure the project settings:
-   - Framework Preset: Vite
-   - Root Directory: `./` (default)
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
+The backend can be deployed to services like:
+- [Railway](https://railway.app)
+- [Render](https://render.com)
+- [Heroku](https://heroku.com)
+- [DigitalOcean App Platform](https://www.digitalocean.com/products/app-platform)
 
-5. Add the following environment variables:
-   - `DATABASE_URL`: Your PostgreSQL connection string
-   - `SESSION_SECRET`: A random string for session encryption (e.g., generate using `openssl rand -base64 32`)
-   - `OPENAI_API_KEY`: (Optional) Your OpenAI API key if you want to use AI features
+#### Required Environment Variables for Backend
+- `DATABASE_URL`: PostgreSQL connection string
+- `SESSION_SECRET`: Random string for securing sessions
+- `OPENAI_API_KEY`: (Optional) For AI-powered valuation features
 
-6. Click "Deploy"
+#### Backend Deployment Steps:
+1. Create a new project on your chosen platform
+2. Connect to this GitHub repository
+3. Set the required environment variables
+4. Set the build command to `npm install && npm run build`
+5. Set the start command to `npm run start`
+6. Deploy and note the URL of your API (e.g., https://carvalueai-api.railway.app)
 
-## Step 3: Verify Your Deployment
+### Step 2: Deploy the Frontend to Vercel
 
-1. Once deployment is complete, Vercel will provide you with a URL
-2. Visit the URL to ensure your application is working correctly
-3. Try the following features to verify:
-   - Homepage loading
-   - Car valuation form
-   - Login/registration
-   - Admin panel access
+1. Create a new project on [Vercel](https://vercel.com)
+2. Connect to this GitHub repository
+3. Set the following environment variables:
+   - `VITE_API_URL`: The URL of your backend API
+4. Set the build command to `npm run build`
+5. Set the output directory to `dist`
+6. Deploy your application
 
-## Step 4: Set Up a Custom Domain (Optional)
+## Option 2: Combined Deployment (Advanced)
 
-1. In your project dashboard, go to "Settings" → "Domains"
-2. Add your custom domain
-3. Follow the instructions to configure DNS settings
+For platforms that support both frontend and backend in a single service (like Heroku, Railway, or Render):
+
+1. Deploy the entire repository
+2. Set the required environment variables (as listed above)
+3. Set the build command to `npm install && npm run build`
+4. Set the start command to `npm run start:prod`
+
+## Testing Your Deployment
+
+After deploying, verify that:
+
+1. The frontend loads correctly
+2. You can register and login
+3. Car valuations work properly
+4. Admin dashboard is accessible to admin users
+5. Payments and inquiries are functioning
 
 ## Troubleshooting
 
-- **Database Connection Issues**: Ensure your database allows connections from Vercel's IP ranges
-- **API Endpoints Not Working**: Check Vercel Functions logs in the project dashboard
-- **Frontend Routes Not Working**: Verify the rewrites in your `vercel.json` file
+### CORS Issues
+If you see CORS errors in the browser console, ensure the backend has the correct CORS configuration for your frontend domain.
 
-## Vercel Serverless Limitations
+### Database Connection Issues
+Verify that your `DATABASE_URL` is correctly set and the database is accessible from your backend service.
 
-- Function execution time is limited to 10 seconds in the free tier
-- Memory usage is limited to 1.5GB
-- If you need more resources, consider upgrading to a paid plan
-
-## Monitoring and Logs
-
-- Use the Vercel dashboard to monitor your application
-- Check the "Functions" tab to see logs for your API endpoints
-- Enable Vercel Analytics to track performance and usage
-
-## Setting Up CI/CD
-
-Vercel automatically sets up continuous deployment from your GitHub repository. Any push to your main branch will trigger a new deployment.
-
-To set up preview deployments for pull requests:
-1. Go to your project settings
-2. Navigate to the "Git" tab
-3. Enable "Preview Deployments"
+### Authentication Problems
+If login/registration doesn't work, check that `SESSION_SECRET` is set and that cookies are being properly handled between the frontend and backend.

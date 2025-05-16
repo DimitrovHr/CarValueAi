@@ -1,10 +1,24 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import cors from "cors";
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Configure CORS for API endpoints
+// In development, the frontend is served from the same origin
+// In production, we need to allow the frontend domain to access the API
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || true, // Allow specified origin or any origin in development
+  credentials: true, // Allow cookies for authenticated requests
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"]
+};
+
+// Apply CORS to API routes only
+app.use("/api", cors(corsOptions));
 
 app.use((req, res, next) => {
   const start = Date.now();

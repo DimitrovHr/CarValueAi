@@ -1,12 +1,10 @@
 # CarValueAI API Documentation
 
-This document outlines the API endpoints available in the CarValueAI application after restructuring for Vercel serverless functions.
+This document describes all the available API endpoints for the CarValueAI application.
 
-## Public Endpoints
+## Authentication Endpoints
 
-### Authentication
-
-#### Register
+### Register a new user
 - **URL**: `/api/register`
 - **Method**: `POST`
 - **Body**:
@@ -18,9 +16,9 @@ This document outlines the API endpoints available in the CarValueAI application
     "lastName": "Doe"
   }
   ```
-- **Response**: User object (without password)
+- **Response**: User object
 
-#### Login
+### Login
 - **URL**: `/api/login`
 - **Method**: `POST`
 - **Body**:
@@ -30,85 +28,155 @@ This document outlines the API endpoints available in the CarValueAI application
     "password": "password123"
   }
   ```
-- **Response**: User object with session information
+- **Response**: User object
 
-### Car Valuations
+### Logout
+- **URL**: `/api/logout`
+- **Method**: `GET`
+- **Response**: Success message
 
-#### Quick Valuation
+### Get current user
+- **URL**: `/api/auth/user`
+- **Method**: `GET`
+- **Response**: User object
+
+## Car Valuation Endpoints
+
+### Request car valuation
 - **URL**: `/api/quick-valuation`
 - **Method**: `POST`
 - **Body**:
   ```json
   {
     "make": "BMW",
-    "model": "530i",
+    "model": "X5",
     "year": 2019,
-    "mileage": 85000,
-    "condition": "good",
-    "vin": "WBAJA5C52KBW51974" // Optional
+    "mileage": 45000,
+    "condition": "excellent",
+    "vin": "WBA7E4C33KGV35137" // Optional
   }
   ```
-- **Response**: Valuation details including estimated value, confidence score, and market trend
+- **Response**: Valuation result
 
-### Inquiries
+### Get valuation by ID
+- **URL**: `/api/valuations/:id`
+- **Method**: `GET`
+- **Response**: Valuation object
 
-#### Submit Inquiry
+### Get user valuations
+- **URL**: `/api/valuations/user`
+- **Method**: `GET`
+- **Response**: Array of valuation objects
+
+## Business Inquiries
+
+### Submit contact inquiry
 - **URL**: `/api/inquiries`
 - **Method**: `POST`
 - **Body**:
   ```json
   {
-    "name": "Jane Smith",
-    "email": "jane@example.com",
-    "phone": "+359 888 123 456", // Optional
-    "message": "I'm interested in your business plan."
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "+1234567890", // Optional
+    "message": "I'm interested in the business subscription plan."
   }
   ```
-- **Response**: Confirmation of inquiry submission
+- **Response**: Inquiry object
 
 ## Admin Endpoints
 
-These endpoints require admin authentication:
+All admin endpoints require admin authentication.
 
-### Dashboard
-
-#### Get Dashboard Stats
+### Dashboard statistics
 - **URL**: `/api/admin/dashboard`
 - **Method**: `GET`
-- **Response**: Statistics including total users, valuations, payments, and revenue
+- **Response**: Dashboard statistics object
 
-### Users
-
-#### Get All Users
+### Users management
 - **URL**: `/api/admin/users`
 - **Method**: `GET`
 - **Response**: Array of user objects
 
-### Valuations
-
-#### Get All Valuations
-- **URL**: `/api/admin/valuations`
+### User details
+- **URL**: `/api/admin/users/:id`
 - **Method**: `GET`
-- **Response**: Array of valuation objects
+- **Response**: User object
 
-### Payments
+### Update user
+- **URL**: `/api/admin/users/:id`
+- **Method**: `PATCH`
+- **Body**: User update object
+- **Response**: Updated user object
 
-#### Get All Payments
-- **URL**: `/api/admin/payments`
-- **Method**: `GET`
-- **Response**: Array of payment objects
+### Generate API key for user
+- **URL**: `/api/admin/users/:id/api-key`
+- **Method**: `POST`
+- **Response**: API key string
 
-### Inquiries
-
-#### Get All Inquiries
+### All inquiries
 - **URL**: `/api/admin/inquiries`
 - **Method**: `GET`
 - **Response**: Array of inquiry objects
 
-## Environment Variables
+### Update inquiry
+- **URL**: `/api/admin/inquiries/:id`
+- **Method**: `PATCH`
+- **Body**: Inquiry update object
+- **Response**: Updated inquiry object
 
-The following environment variables must be set in Vercel:
+### All payments
+- **URL**: `/api/admin/payments`
+- **Method**: `GET`
+- **Response**: Array of payment objects
 
-- `DATABASE_URL`: PostgreSQL connection string
-- `SESSION_SECRET`: Secret for session encryption
-- `OPENAI_API_KEY`: (Optional) API key for OpenAI integration if enhanced valuation is enabled
+### All valuations
+- **URL**: `/api/admin/valuations`
+- **Method**: `GET`
+- **Response**: Array of valuation objects
+
+## Business Subscription Endpoints
+
+### Create business subscription
+- **URL**: `/api/subscriptions`
+- **Method**: `POST`
+- **Body**:
+  ```json
+  {
+    "plan": "small",
+    "monthlyQuota": 50,
+    "paymentFrequency": "monthly",
+    "amount": 199.99
+  }
+  ```
+- **Response**: Subscription object
+
+### Get user's active subscription
+- **URL**: `/api/subscriptions/user`
+- **Method**: `GET`
+- **Response**: Subscription object
+
+## API Usage (For Business Clients)
+
+Business clients can use their API key to access valuation services programmatically.
+
+### API Valuation
+- **URL**: `/api/valuation`
+- **Method**: `POST`
+- **Headers**:
+  ```
+  X-API-Key: your-api-key
+  ```
+- **Body**:
+  ```json
+  {
+    "make": "BMW",
+    "model": "X5",
+    "year": 2019,
+    "mileage": 45000,
+    "condition": "excellent",
+    "vin": "WBA7E4C33KGV35137",
+    "clientEmail": "client@example.com" // Optional, for business users to track their client
+  }
+  ```
+- **Response**: Valuation result
