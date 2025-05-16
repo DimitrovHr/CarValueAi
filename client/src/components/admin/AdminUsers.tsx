@@ -150,7 +150,7 @@ export default function AdminUsers({ userId }: { userId: number | null }) {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.isActive ? 'success' : 'secondary'}>
+                      <Badge variant={user.isActive ? 'default' : 'secondary'}>
                         {user.isActive ? 'Active' : 'Inactive'}
                       </Badge>
                     </TableCell>

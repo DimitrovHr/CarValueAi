@@ -124,8 +124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...userData,
         password: hashedPassword,
         role: "user",
-        plan: "free", // Default plan
-        isActive: true
+        plan: "free" // Default plan
       });
       
       // Remove password from response
@@ -296,10 +295,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const paymentData = insertPaymentSchema.parse(req.body);
       
-      const payment = await storage.createPayment({
+      // Create a payment
+      const paymentWithDate = {
         ...paymentData,
-        paymentDate: new Date()
-      });
+        // We'll handle paymentDate in the storage layer
+      };
+      
+      const payment = await storage.createPayment(paymentWithDate);
       
       // If this payment is for a valuation, mark it as paid
       if (payment.valuationId) {
