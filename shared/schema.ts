@@ -105,6 +105,7 @@ export const insertCarValuationSchema = createInsertSchema(carValuations).pick({
   model: true,
   year: true,
   mileage: true,
+  vin: true,
   condition: true,
   requestSource: true,
 });

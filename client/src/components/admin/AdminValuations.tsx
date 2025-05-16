@@ -14,6 +14,7 @@ type CarValuation = {
   model: string;
   year: number;
   mileage: number;
+  vin?: string; // Added VIN field (optional)
   condition: string;
   estimatedValue: string;
   confidence: string;
@@ -105,6 +106,7 @@ export default function AdminValuations({ userId }: { userId: number | null }) {
                     <TableCell>
                       <div>{valuation.make} {valuation.model}</div>
                       <div className="text-xs text-muted-foreground">{valuation.year}, {valuation.mileage} km, {valuation.condition}</div>
+                      {valuation.vin && <div className="text-xs mt-1 font-mono text-accent-600">VIN: {valuation.vin}</div>}
                     </TableCell>
                     <TableCell>€{Number(valuation.estimatedValue).toLocaleString()}</TableCell>
                     <TableCell>{(Number(valuation.confidence) * 100).toFixed()}%</TableCell>
