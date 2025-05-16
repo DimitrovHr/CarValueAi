@@ -6,7 +6,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const carMakes = [
-  { value: "", label: "Select Make", disabled: true },
+  { value: "select-make", label: "Select Make", disabled: true },
   { value: "audi", label: "Audi" },
   { value: "bmw", label: "BMW" },
   { value: "mercedes", label: "Mercedes-Benz" },
