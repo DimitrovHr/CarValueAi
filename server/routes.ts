@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertCarValuationSchema, insertUserSchema, insertSubscriptionSchema } from "@shared/schema";
+import { insertCarValuationSchema, insertUserSchema, insertBusinessSubscriptionSchema, insertPaymentSchema, insertInquirySchema } from "@shared/schema";
 import { z } from "zod";
 import { hashPassword, comparePassword } from "./auth";
 
@@ -123,8 +123,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.createUser({
         ...userData,
         password: hashedPassword,
-        subscriptionStatus: "trial",
-        plan: "regular", // Default trial plan is regular
+        role: "user",
+        plan: "free", // Default plan
+        isActive: true
       });
       
       // Remove password from response
